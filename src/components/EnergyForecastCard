@@ -1,0 +1,101 @@
+import { useEffect, useState } from "react";
+import { supabase } from "../supabaseClient";
+import {
+  PiezoReading,
+  EnergyPrediction,
+  predictFutureEnergy,
+} from "../lib/energyML";
+
+export default function EnergyForecastCard() {
+  const [prediction, setPrediction] = useState<EnergyPrediction | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [targetHour, setTargetHour] = useState(1);
+
+  useEffect(() => {
+    loadPrediction();
+  }, [targetHour]);
+
+  async function loadPrediction() {
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from("piezo_readings")
+      .select("id, voltage, energy_mj, footstep_count, status, created_at")
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (error) {
+      console.error("Supabase error:", error);
+      setLoading(false);
+      return;
+    }
+
+    const futureTime = new Date();
+    futureTime.setHours(futureTime.getHours() + targetHour);
+
+    const result = predictFutureEnergy((data || []) as PiezoReading[], futureTime);
+
+    setPrediction(result);
+    setLoading(false);
+  }
+
+  return (
+    <div className="rounded-2xl border bg-white p-5 shadow-sm">
+      <div className="mb-4">
+        <h2 className="text-xl font-semibold">AI Energy Forecast</h2>
+        <p className="text-sm text-gray-500">
+          ML-based prediction using past Supabase records
+        </p>
+      </div>
+
+      <div className="mb-4">
+        <label className="text-sm font-medium">Predict after</label>
+        <select
+          className="mt-2 w-full rounded-lg border p-2"
+          value={targetHour}
+          onChange={(e) => setTargetHour(Number(e.target.value))}
+        >
+          <option value={1}>Next 1 hour</option>
+          <option value={2}>Next 2 hours</option>
+          <option value={6}>Next 6 hours</option>
+          <option value={12}>Next 12 hours</option>
+          <option value={24}>Next 24 hours</option>
+        </select>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-gray-500">Training ML model...</p>
+      ) : prediction ? (
+        <div className="space-y-3">
+          <div>
+            <p className="text-sm text-gray-500">Predicted Energy</p>
+            <p className="text-3xl font-bold">
+              {prediction.predictedEnergy} mJ
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-gray-50 p-3">
+              <p className="text-xs text-gray-500">Confidence</p>
+              <p className="font-semibold">{prediction.confidence}</p>
+            </div>
+
+            <div className="rounded-xl bg-gray-50 p-3">
+              <p className="text-xs text-gray-500">Training Records</p>
+              <p className="font-semibold">{prediction.trainingRecords}</p>
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-gray-50 p-3">
+            <p className="text-xs text-gray-500">Model</p>
+            <p className="font-semibold">{prediction.modelType}</p>
+          </div>
+
+          <p className="text-sm text-gray-600">{prediction.message}</p>
+        </div>
+      ) : (
+        <p className="text-sm text-red-500">Prediction unavailable.</p>
+      )}
+    </div>
+  );
+}
