@@ -1,26 +1,34 @@
-export type PiezoReading = {
-  id?: number;
-  voltage: number;
-  energy_mj?: number;
-  footstep_count?: number;
-  status?: string;
+export type EnergyReadingForML = {
+  id?: number | string;
+  capacitor_voltage?: number | null;
+  charge_percent?: number | null;
+  adc_value?: number | null;
+  status?: string | null;
   created_at: string;
 };
 
 export type EnergyPrediction = {
-  predictedEnergy: number;
+  predictedVoltage: number;
+  predictedCharge: number;
+  predictedEnergyMJ: number;
   confidence: "Low" | "Medium" | "High";
   trainingRecords: number;
   modelType: string;
   message: string;
 };
 
-function sigmoidSafe(value: number) {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(-1e6, Math.min(1e6, value));
+// You are using 5 capacitors of 100uF.
+// Total capacitance = 500uF.
+const TOTAL_CAPACITANCE_UF = 500;
+
+// Energy formula: E = 1/2 × C × V²
+function estimateEnergyMJ(voltage: number) {
+  const capacitanceF = TOTAL_CAPACITANCE_UF / 1_000_000;
+  const energyJ = 0.5 * capacitanceF * voltage * voltage;
+  return energyJ * 1000;
 }
 
-function getFeatures(date: Date, voltage: number, footstepCount: number) {
+function getTimeFeatures(date: Date) {
   const hour = date.getHours();
   const day = date.getDay();
 
@@ -30,53 +38,11 @@ function getFeatures(date: Date, voltage: number, footstepCount: number) {
   const daySin = Math.sin((2 * Math.PI * day) / 7);
   const dayCos = Math.cos((2 * Math.PI * day) / 7);
 
-  return [
-    1,
-    hourSin,
-    hourCos,
-    daySin,
-    dayCos,
-    voltage,
-    footstepCount,
-  ];
+  return [1, hourSin, hourCos, daySin, dayCos];
 }
 
-function estimateFutureInputs(readings: PiezoReading[], targetDate: Date) {
-  const targetHour = targetDate.getHours();
-
-  const sameHourReadings = readings.filter((item) => {
-    const date = new Date(item.created_at);
-    return date.getHours() === targetHour;
-  });
-
-  const usefulReadings =
-    sameHourReadings.length > 0 ? sameHourReadings : readings;
-
-  const avgVoltage =
-    usefulReadings.reduce((sum, item) => sum + Number(item.voltage || 0), 0) /
-    usefulReadings.length;
-
-  const avgFootsteps =
-    usefulReadings.reduce(
-      (sum, item) => sum + Number(item.footstep_count || 1),
-      0
-    ) / usefulReadings.length;
-
-  return {
-    voltage: avgVoltage || 0,
-    footstepCount: avgFootsteps || 1,
-  };
-}
-
-function trainGradientDescent(
-  X: number[][],
-  y: number[],
-  learningRate = 0.01,
-  epochs = 2500
-) {
+function normalizeMatrix(X: number[][]) {
   const featureCount = X[0].length;
-  const weights = new Array(featureCount).fill(0);
-
   const means = new Array(featureCount).fill(0);
   const stds = new Array(featureCount).fill(1);
 
@@ -97,6 +63,19 @@ function trainGradientDescent(
     })
   );
 
+  return { normalizedX, means, stds };
+}
+
+function trainLinearRegression(
+  X: number[][],
+  y: number[],
+  learningRate = 0.03,
+  epochs = 2000
+) {
+  const { normalizedX, means, stds } = normalizeMatrix(X);
+  const featureCount = normalizedX[0].length;
+  const weights = new Array(featureCount).fill(0);
+
   for (let epoch = 0; epoch < epochs; epoch++) {
     const gradients = new Array(featureCount).fill(0);
 
@@ -115,18 +94,17 @@ function trainGradientDescent(
 
     for (let j = 0; j < featureCount; j++) {
       weights[j] -= (learningRate * gradients[j]) / normalizedX.length;
-      weights[j] = sigmoidSafe(weights[j]);
+
+      if (!Number.isFinite(weights[j])) {
+        weights[j] = 0;
+      }
     }
   }
 
-  return {
-    weights,
-    means,
-    stds,
-  };
+  return { weights, means, stds };
 }
 
-function predictWithModel(
+function predict(
   features: number[],
   model: {
     weights: number[];
@@ -139,56 +117,59 @@ function predictWithModel(
     return (value - model.means[index]) / model.stds[index];
   });
 
-  const prediction = normalizedFeatures.reduce(
+  return normalizedFeatures.reduce(
     (sum, value, index) => sum + value * model.weights[index],
     0
   );
-
-  return Math.max(0, prediction);
 }
 
-export function predictFutureEnergy(
-  readings: PiezoReading[],
+export function predictFutureEnergyFromReadings(
+  readings: EnergyReadingForML[],
   targetDate: Date
 ): EnergyPrediction {
-  const validReadings = readings.filter(
-    (item) =>
+  const validReadings = readings.filter((item) => {
+    return (
       item.created_at &&
-      Number.isFinite(Number(item.voltage)) &&
-      Number.isFinite(Number(item.energy_mj))
-  );
+      Number.isFinite(Number(item.capacitor_voltage)) &&
+      Number.isFinite(Number(item.charge_percent))
+    );
+  });
 
   if (validReadings.length < 8) {
     return {
-      predictedEnergy: 0,
+      predictedVoltage: 0,
+      predictedCharge: 0,
+      predictedEnergyMJ: 0,
       confidence: "Low",
       trainingRecords: validReadings.length,
       modelType: "Multiple Linear Regression",
-      message: "Not enough historical data to train the ML model.",
+      message: "Not enough Supabase records to train the AI/ML model.",
     };
   }
 
   const X = validReadings.map((item) =>
-    getFeatures(
-      new Date(item.created_at),
-      Number(item.voltage || 0),
-      Number(item.footstep_count || 1)
-    )
+    getTimeFeatures(new Date(item.created_at))
   );
 
-  const y = validReadings.map((item) => Number(item.energy_mj || 0));
-
-  const model = trainGradientDescent(X, y);
-
-  const estimatedInputs = estimateFutureInputs(validReadings, targetDate);
-
-  const futureFeatures = getFeatures(
-    targetDate,
-    estimatedInputs.voltage,
-    estimatedInputs.footstepCount
+  const yVoltage = validReadings.map((item) =>
+    Number(item.capacitor_voltage || 0)
   );
 
-  const predictedEnergy = predictWithModel(futureFeatures, model);
+  const yCharge = validReadings.map((item) =>
+    Number(item.charge_percent || 0)
+  );
+
+  const voltageModel = trainLinearRegression(X, yVoltage);
+  const chargeModel = trainLinearRegression(X, yCharge);
+
+  const futureFeatures = getTimeFeatures(targetDate);
+
+  const predictedVoltageRaw = predict(futureFeatures, voltageModel);
+  const predictedChargeRaw = predict(futureFeatures, chargeModel);
+
+  const predictedVoltage = Math.max(0, Math.min(3.3, predictedVoltageRaw));
+  const predictedCharge = Math.max(0, Math.min(100, predictedChargeRaw));
+  const predictedEnergyMJ = estimateEnergyMJ(predictedVoltage);
 
   let confidence: "Low" | "Medium" | "High" = "Low";
 
@@ -199,10 +180,12 @@ export function predictFutureEnergy(
   }
 
   return {
-    predictedEnergy: Number(predictedEnergy.toFixed(3)),
+    predictedVoltage: Number(predictedVoltage.toFixed(2)),
+    predictedCharge: Number(predictedCharge.toFixed(1)),
+    predictedEnergyMJ: Number(predictedEnergyMJ.toFixed(4)),
     confidence,
     trainingRecords: validReadings.length,
     modelType: "Multiple Linear Regression with Time Features",
-    message: `Prediction generated using ${validReadings.length} past Supabase records.`,
+    message: `AI prediction generated using ${validReadings.length} past Supabase records.`,
   };
 }
