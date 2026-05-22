@@ -122,21 +122,38 @@ function KpiCard({ title, value, subtitle, icon: Icon, color, spark }: {
   icon: React.ComponentType<{ size?: number; color?: string }>; color: string; spark?: number[];
 }) {
   return (
-    <Card>
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{title}</div>
-          <div className="mt-2 text-2xl font-bold" style={{ color: C.dark }}>{value}</div>
-          <div className="text-xs text-slate-500 mt-1">{subtitle}</div>
+    <Card className="!p-4 min-h-[180px]">
+      <div className="flex flex-col h-full">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500 leading-snug">
+              {title}
+            </div>
+
+            <div
+              className="mt-2 text-2xl font-bold leading-tight break-words"
+              style={{ color: C.dark }}
+            >
+              {value}
+            </div>
+
+            <div className="text-xs text-slate-500 mt-1 leading-snug">
+              {subtitle}
+            </div>
+          </div>
+
+          <div
+            className="h-9 w-9 min-w-9 shrink-0 rounded-xl flex items-center justify-center"
+            style={{ backgroundColor: `${color}1A` }}
+          >
+            <Icon size={18} color={color} />
+          </div>
         </div>
-        <div
-          className="h-10 w-10 rounded-xl flex items-center justify-center"
-          style={{ backgroundColor: `${color}1A` }}
-        >
-          <Icon size={20} color={color} />
+
+        <div className="mt-auto">
+          {spark && spark.length > 1 && <Sparkline data={spark} color={color} />}
         </div>
       </div>
-      {spark && spark.length > 1 && <Sparkline data={spark} color={color} />}
     </Card>
   );
 }
