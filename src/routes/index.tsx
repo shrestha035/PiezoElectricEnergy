@@ -9,6 +9,7 @@ import {
   Zap, Cpu, Settings, Lightbulb, Database, Wifi, Menu, X,
 } from "lucide-react";
 import { supabase, type EnergyReading } from "@/lib/supabaseClient";
+import EnergyForecastCard from "../components/EnergyForecastCard";
 
 export const Route = createFileRoute("/")({
   component: Dashboard,
@@ -688,6 +689,11 @@ function Dashboard() {
             {/* FORECASTING */}
             <section id="forecasting" className="scroll-mt-24">
               <SectionHeader title="Energy Forecasting" />
+
+              <div className="mb-4">
+                <EnergyForecastCard />
+              </div>
+
               <Card className="mb-4">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{
