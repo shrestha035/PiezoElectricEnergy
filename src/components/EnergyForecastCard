@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { Brain, TrendingUp, Battery, Zap } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import {
-  EnergyPrediction,
-  EnergyReadingForML,
+  type EnergyPrediction,
+  type EnergyReadingForML,
   predictFutureEnergyFromReadings,
 } from "../lib/energyML";
 
@@ -21,9 +21,7 @@ export default function EnergyForecastCard() {
 
     const { data, error } = await supabase
       .from("energy_readings")
-      .select(
-        "id, capacitor_voltage, charge_percent, adc_value, status, created_at"
-      )
+      .select("id, capacitor_voltage, charge_percent, adc_value, status, created_at")
       .order("created_at", { ascending: false })
       .limit(500);
 
@@ -37,10 +35,9 @@ export default function EnergyForecastCard() {
     const futureTime = new Date();
     futureTime.setHours(futureTime.getHours() + targetHour);
 
-    const result = predictFutureEnergyFromReadings(
-      (data || []) as EnergyReadingForML[],
-      futureTime
-    );
+    const readings = (data ?? []) as EnergyReadingForML[];
+
+    const result = predictFutureEnergyFromReadings(readings, futureTime);
 
     setPrediction(result);
     setLoading(false);
@@ -56,6 +53,7 @@ export default function EnergyForecastCard() {
               AI Energy Forecast
             </h2>
           </div>
+
           <p className="mt-1 text-sm text-slate-500">
             ML prediction using past Supabase energy readings
           </p>
