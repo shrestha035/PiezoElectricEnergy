@@ -428,7 +428,7 @@ function Dashboard() {
             {/* OVERVIEW */}
             <section id="overview" className="scroll-mt-24">
               <SectionHeader title="Overview" subtitle="Latest live telemetry from ESP32" />
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-4">
                 <KpiCard
                   title="Capacitor Voltage"
                   value={latest ? `${Number(latest.capacitor_voltage ?? 0).toFixed(2)} V` : "—"}
