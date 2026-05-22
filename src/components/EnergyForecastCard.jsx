@@ -1,10 +1,20 @@
 import { useEffect, useState } from "react";
 import { Brain, TrendingUp, Battery, Zap } from "lucide-react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 import { supabase } from "../lib/supabaseClient";
 import { predictFutureEnergyFromReadings } from "../lib/energyML";
 
 export default function EnergyForecastCard() {
   const [prediction, setPrediction] = useState(null);
+  const [forecastGraph, setForecastGraph] = useState([]);
   const [loading, setLoading] = useState(true);
   const [targetHour, setTargetHour] = useState(1);
 
@@ -17,23 +27,52 @@ export default function EnergyForecastCard() {
 
     const { data, error } = await supabase
       .from("energy_readings")
-      .select("id, capacitor_voltage, charge_percent, adc_value, status, created_at")
+      .select(
+        "id, capacitor_voltage, charge_percent, adc_value, status, created_at"
+      )
       .order("created_at", { ascending: false })
       .limit(500);
 
     if (error) {
       console.error("Supabase AI forecast error:", error);
       setPrediction(null);
+      setForecastGraph([]);
       setLoading(false);
       return;
     }
 
+    const readings = data || [];
+
     const futureTime = new Date();
     futureTime.setHours(futureTime.getHours() + targetHour);
 
-    const result = predictFutureEnergyFromReadings(data || [], futureTime);
+    const result = predictFutureEnergyFromReadings(readings, futureTime);
+
+    const graphData = [];
+
+    for (let i = 1; i <= 24; i++) {
+      const hourTime = new Date();
+      hourTime.setHours(hourTime.getHours() + i);
+
+      const hourlyPrediction = predictFutureEnergyFromReadings(
+        readings,
+        hourTime
+      );
+
+      graphData.push({
+        hour: `${i}h`,
+        time: hourTime.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        energy: hourlyPrediction.predictedEnergyMJ,
+        voltage: hourlyPrediction.predictedVoltage,
+        charge: hourlyPrediction.predictedCharge,
+      });
+    }
 
     setPrediction(result);
+    setForecastGraph(graphData);
     setLoading(false);
   }
 
@@ -125,6 +164,55 @@ export default function EnergyForecastCard() {
               <p className="mt-1 text-lg font-bold text-slate-900">
                 {prediction.confidence}
               </p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <div className="mb-3">
+              <p className="text-sm font-semibold text-slate-900">
+                24-Hour Energy Prediction Trend
+              </p>
+              <p className="text-xs text-slate-500">
+                Shows expected rise and fall of harvested energy throughout the day
+              </p>
+            </div>
+
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={forecastGraph}>
+                  <CartesianGrid stroke="#E2E8F0" strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="hour"
+                    stroke="#64748B"
+                    fontSize={11}
+                    minTickGap={14}
+                  />
+                  <YAxis stroke="#64748B" fontSize={11} />
+                  <Tooltip
+                    formatter={(value, name) => {
+                      if (name === "energy") return [`${value} mJ`, "Energy"];
+                      if (name === "voltage") return [`${value} V`, "Voltage"];
+                      if (name === "charge") return [`${value}%`, "Charge"];
+                      return value;
+                    }}
+                    labelFormatter={(label, payload) => {
+                      if (payload && payload.length > 0) {
+                        return `After ${label} | ${payload[0].payload.time}`;
+                      }
+                      return label;
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="energy"
+                    stroke="#8B5CF6"
+                    strokeWidth={3}
+                    dot={{ r: 3 }}
+                    activeDot={{ r: 6 }}
+                    name="energy"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
             </div>
           </div>
 
