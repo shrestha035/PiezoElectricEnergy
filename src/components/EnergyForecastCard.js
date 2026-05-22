@@ -1,14 +1,10 @@
 import { useEffect, useState } from "react";
 import { Brain, TrendingUp, Battery, Zap } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import {
-  type EnergyPrediction,
-  type EnergyReadingForML,
-  predictFutureEnergyFromReadings,
-} from "../lib/energyML";
+import { predictFutureEnergyFromReadings } from "../lib/energyML";
 
 export default function EnergyForecastCard() {
-  const [prediction, setPrediction] = useState<EnergyPrediction | null>(null);
+  const [prediction, setPrediction] = useState(null);
   const [loading, setLoading] = useState(true);
   const [targetHour, setTargetHour] = useState(1);
 
@@ -35,9 +31,7 @@ export default function EnergyForecastCard() {
     const futureTime = new Date();
     futureTime.setHours(futureTime.getHours() + targetHour);
 
-    const readings = (data ?? []) as EnergyReadingForML[];
-
-    const result = predictFutureEnergyFromReadings(readings, futureTime);
+    const result = predictFutureEnergyFromReadings(data || [], futureTime);
 
     setPrediction(result);
     setLoading(false);
