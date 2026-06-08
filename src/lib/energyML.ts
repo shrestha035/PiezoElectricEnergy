@@ -19,7 +19,7 @@ export type EnergyPrediction = {
 
 const TOTAL_CAPACITANCE_UF = 500;
 
-// Energy formula: E = 1/2 × C × V²
+// E = 1/2 × C × V²
 function estimateEnergyMJ(voltage: number) {
   const capacitanceF = TOTAL_CAPACITANCE_UF / 1_000_000;
   const energyJ = 0.5 * capacitanceF * voltage * voltage;
@@ -28,32 +28,81 @@ function estimateEnergyMJ(voltage: number) {
 
 function average(values: number[]) {
   if (values.length === 0) return 0;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+
+  return (
+    values.reduce((sum, value) => sum + value, 0) /
+    values.length
+  );
 }
 
-function getHourWeight(hour: number) {
-  // Makes prediction look realistic for footstep-based energy harvesting
-  if (hour >= 0 && hour <= 5) return 0.55;      // night low
-  if (hour >= 6 && hour <= 8) return 0.85;      // morning rise
-  if (hour >= 9 && hour <= 11) return 1.25;     // morning activity
-  if (hour >= 12 && hour <= 14) return 1.45;    // afternoon peak
-  if (hour >= 15 && hour <= 17) return 1.05;    // slight drop
-  if (hour >= 18 && hour <= 20) return 1.55;    // evening peak
-  if (hour >= 21 && hour <= 23) return 0.80;    // night drop
-  return 1;
+function linearRegression(
+  x: number[],
+  y: number[]
+) {
+  const n = x.length;
+
+  const sumX = x.reduce(
+    (a, b) => a + b,
+    0
+  );
+
+  const sumY = y.reduce(
+    (a, b) => a + b,
+    0
+  );
+
+  const sumXY = x.reduce(
+    (acc, value, index) =>
+      acc + value * y[index],
+    0
+  );
+
+  const sumXX = x.reduce(
+    (acc, value) =>
+      acc + value * value,
+    0
+  );
+
+  const denominator =
+    n * sumXX - sumX * sumX;
+
+  if (denominator === 0) {
+    return {
+      slope: 0,
+      intercept: average(y),
+    };
+  }
+
+  const slope =
+    (n * sumXY -
+      sumX * sumY) /
+    denominator;
+
+  const intercept =
+    (sumY -
+      slope * sumX) /
+    n;
+
+  return {
+    slope,
+    intercept,
+  };
 }
 
 export function predictFutureEnergyFromReadings(
   readings: EnergyReadingForML[],
   targetDate: Date
 ): EnergyPrediction {
-  const validReadings = readings.filter((item) => {
-    return (
+  const validReadings = readings.filter(
+    (item) =>
       item.created_at &&
-      Number.isFinite(Number(item.capacitor_voltage)) &&
-      Number.isFinite(Number(item.charge_percent))
-    );
-  });
+      Number.isFinite(
+        Number(item.capacitor_voltage)
+      ) &&
+      Number.isFinite(
+        Number(item.charge_percent)
+      )
+  );
 
   if (validReadings.length < 8) {
     return {
@@ -61,77 +110,120 @@ export function predictFutureEnergyFromReadings(
       predictedCharge: 0,
       predictedEnergyMJ: 0,
       confidence: "Low",
-      trainingRecords: validReadings.length,
-      modelType: "Hourly Pattern Regression",
-      message: "Not enough Supabase records to train the AI/ML model.",
+      trainingRecords:
+        validReadings.length,
+      modelType:
+        "Linear Regression",
+      message:
+        "Not enough Supabase records to train the ML model.",
     };
   }
 
-  const targetHour = targetDate.getHours();
+  const targetHour =
+    targetDate.getHours();
 
-  const sameHourReadings = validReadings.filter((item) => {
-    const itemHour = new Date(item.created_at).getHours();
-    return itemHour === targetHour;
-  });
+  const hours =
+    validReadings.map((item) =>
+      new Date(
+        item.created_at
+      ).getHours()
+    );
 
-  const nearbyHourReadings = validReadings.filter((item) => {
-    const itemHour = new Date(item.created_at).getHours();
-    return Math.abs(itemHour - targetHour) <= 1;
-  });
+  const voltages =
+    validReadings.map((item) =>
+      Number(
+        item.capacitor_voltage || 0
+      )
+    );
 
-  const trainingSet =
-    sameHourReadings.length >= 3
-      ? sameHourReadings
-      : nearbyHourReadings.length >= 3
-      ? nearbyHourReadings
-      : validReadings;
+  const charges =
+    validReadings.map((item) =>
+      Number(
+        item.charge_percent || 0
+      )
+    );
 
-  const avgVoltage = average(
-    trainingSet.map((item) => Number(item.capacitor_voltage || 0))
-  );
+  const voltageModel =
+    linearRegression(
+      hours,
+      voltages
+    );
 
-  const avgCharge = average(
-    trainingSet.map((item) => Number(item.charge_percent || 0))
-  );
+  const chargeModel =
+    linearRegression(
+      hours,
+      charges
+    );
 
-  const globalAvgVoltage = average(
-    validReadings.map((item) => Number(item.capacitor_voltage || 0))
-  );
-
-  const globalAvgCharge = average(
-    validReadings.map((item) => Number(item.charge_percent || 0))
-  );
-
-  const hourWeight = getHourWeight(targetHour);
-
-  // Blend actual same-hour history with daily activity pattern
   let predictedVoltage =
-    avgVoltage * 0.75 + globalAvgVoltage * hourWeight * 0.25;
+    voltageModel.slope *
+      targetHour +
+    voltageModel.intercept;
 
   let predictedCharge =
-    avgCharge * 0.75 + globalAvgCharge * hourWeight * 0.25;
+    chargeModel.slope *
+      targetHour +
+    chargeModel.intercept;
 
-  // Keep realistic capacitor voltage range for your dashboard
-  predictedVoltage = Math.max(0.8, Math.min(5.5, predictedVoltage));
-  predictedCharge = Math.max(5, Math.min(100, predictedCharge));
+  predictedVoltage = Math.max(
+    0.8,
+    Math.min(
+      6.0,
+      predictedVoltage
+    )
+  );
 
-  const predictedEnergyMJ = estimateEnergyMJ(predictedVoltage);
+  predictedCharge = Math.max(
+    5,
+    Math.min(
+      100,
+      predictedCharge
+    )
+  );
 
-  let confidence: "Low" | "Medium" | "High" = "Low";
+  const predictedEnergyMJ =
+    estimateEnergyMJ(
+      predictedVoltage
+    );
 
-  if (validReadings.length >= 300) {
+  let confidence:
+    | "Low"
+    | "Medium"
+    | "High" = "Low";
+
+  if (
+    validReadings.length >=
+    300
+  ) {
     confidence = "High";
-  } else if (validReadings.length >= 80) {
+  } else if (
+    validReadings.length >=
+    80
+  ) {
     confidence = "Medium";
   }
 
   return {
-    predictedVoltage: Number(predictedVoltage.toFixed(2)),
-    predictedCharge: Number(predictedCharge.toFixed(1)),
-    predictedEnergyMJ: Number(predictedEnergyMJ.toFixed(4)),
+    predictedVoltage: Number(
+      predictedVoltage.toFixed(2)
+    ),
+
+    predictedCharge: Number(
+      predictedCharge.toFixed(1)
+    ),
+
+    predictedEnergyMJ: Number(
+      predictedEnergyMJ.toFixed(4)
+    ),
+
     confidence,
-    trainingRecords: validReadings.length,
-    modelType: "Hourly Pattern Regression with Historical Supabase Records",
-    message: `AI prediction generated using ${validReadings.length} past Supabase records.`,
+
+    trainingRecords:
+      validReadings.length,
+
+    modelType:
+      "Linear Regression using Historical Supabase Records",
+
+    message: `Linear Regression trained using ${validReadings.length} Supabase records.`,
   };
 }
